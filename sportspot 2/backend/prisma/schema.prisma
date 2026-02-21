@@ -1,0 +1,298 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SportType {
+  FOOTBALL
+  PADEL
+}
+
+enum GenderType {
+  MALE_ONLY
+  FEMALE_ONLY
+  MIXED
+}
+
+enum MatchType {
+  PUBLIC
+  PRIVATE
+  OPEN
+}
+
+enum MatchStatus {
+  DRAFT
+  OPEN
+  FULL
+  COMPLETED
+  CANCELED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  REFUNDED
+}
+
+enum TransactionStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+// ============================================
+// CORE ENTITIES
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // hashed with bcrypt
+  name      String
+  gender    Gender   // CRITICAL: enforced gender field
+  role      UserRole @default(USER)
+  skillLevel String? // e.g., "beginner", "intermediate", "advanced"
+  rating    Float    @default(0)
+  phone     String?
+  city      String   @default("Al Ain") // extensible for future expansion
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  createdMatches   Match[]           @relation("MatchCreator")
+  matchParticipants MatchParticipant[]
+  bookings         Booking[]
+  reviews          Review[]
+  transactions     Transaction[]
+  receivedReviews  Review[]          @relation("ReviewedUser")
+
+  @@index([email])
+  @@index([gender])
+  @@index([role])
+}
+
+model Venue {
+  id            String      @id @default(cuid())
+  name          String
+  location      String
+  city          String      @default("Al Ain")
+  sportTypes    SportType[] // array of supported sports
+  basePrice     Float       // base price per hour
+  rating        Float       @default(0)
+  contactPerson String?
+  phone         String?
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  timeSlots     VenueTimeSlot[]
+  matches       Match[]
+  reviews       Review[]
+
+  @@index([city])
+  @@index([name])
+}
+
+model VenueTimeSlot {
+  id          String     @id @default(cuid())
+  venueId     String
+  venue       Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  
+  startTime   DateTime
+  endTime     DateTime
+  genderType  GenderType // CRITICAL: gender enforcement
+  price       Float
+  isAvailable Boolean    @default(true)
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  bookings    Booking[]
+  matches     Match[]
+
+  @@unique([venueId, startTime])
+  @@index([venueId])
+  @@index([genderType])
+  @@index([isAvailable])
+  @@index([startTime])
+}
+
+model Match {
+  id              String       @id @default(cuid())
+  sportType       SportType
+  venueId         String
+  venue           Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  
+  creatorId       String
+  creator         User         @relation("MatchCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  
+  venueTimeSlotId String?
+  venueTimeSlot   VenueTimeSlot? @relation(fields: [venueTimeSlotId], references: [id], onDelete: SetNull)
+  
+  startTime       DateTime
+  endTime         DateTime
+  genderType      GenderType   // CRITICAL: gender enforcement at match level
+  matchType       MatchType    @default(PUBLIC)
+  
+  totalPlayers    Int          // total capacity
+  requiredPlayers Int          // minimum to start
+  currentPlayers  Int          @default(1) // includes creator
+  
+  pricePerPlayer  Float        @default(0) // 0 = free
+  status          MatchStatus  @default(DRAFT)
+  description     String?
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  participants    MatchParticipant[]
+  transactions    Transaction[]
+
+  @@index([creatorId])
+  @@index([venueId])
+  @@index([genderType])
+  @@index([status])
+  @@index([sportType])
+  @@index([startTime])
+}
+
+model MatchParticipant {
+  id            String        @id @default(cuid())
+  matchId       String
+  match         Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  paymentStatus PaymentStatus @default(PENDING)
+  joinedAt      DateTime      @default(now())
+
+  // Relations
+  transaction   Transaction?
+
+  @@unique([matchId, userId])
+  @@index([matchId])
+  @@index([userId])
+}
+
+model Booking {
+  id                String        @id @default(cuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  venueTimeSlotId   String
+  venueTimeSlot     VenueTimeSlot @relation(fields: [venueTimeSlotId], references: [id], onDelete: Cascade)
+  
+  genderType        GenderType    // validated against slot
+  totalPrice        Float
+  status            BookingStatus @default(PENDING)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  transaction       Transaction?
+
+  @@unique([userId, venueTimeSlotId])
+  @@index([userId])
+  @@index([venueTimeSlotId])
+  @@index([status])
+}
+
+model Transaction {
+  id                String            @id @default(cuid())
+  userId            String
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  amount            Float
+  currency          String            @default("AED")
+  paymentProvider   String            @default("VISA_GATEWAY")
+  providerReference String            @unique // reference ID from Visa gateway
+  
+  status            TransactionStatus @default(INITIATED)
+  
+  relatedMatchId    String?
+  relatedMatch      Match?            @relation(fields: [relatedMatchId], references: [id], onDelete: SetNull)
+  
+  relatedMatchParticipantId String?
+  relatedMatchParticipant    MatchParticipant? @relation(fields: [relatedMatchParticipantId], references: [id], onDelete: SetNull)
+  
+  relatedBookingId  String?
+  relatedBooking    Booking?          @relation(fields: [relatedBookingId], references: [id], onDelete: SetNull)
+  
+  platformCommission Float            @default(0)
+  commissionPercentage Float          @default(0)
+  metadata          String? // JSON string for additional data
+  
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([relatedMatchId])
+  @@index([relatedBookingId])
+  @@index([createdAt])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  venueId   String?
+  venue     Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  
+  reviewedUserId String?
+  reviewedUser User? @relation("ReviewedUser", fields: [reviewedUserId], references: [id], onDelete: SetNull)
+  
+  rating    Int      // 1-5
+  comment   String?
+  
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([venueId])
+  @@index([reviewedUserId])
+}
+
+model Settings {
+  id    String  @id @default(cuid())
+  key   String  @unique // e.g., "platform_commission_percentage"
+  value String  // stored as JSON string
+
+  @@index([key])
+}
