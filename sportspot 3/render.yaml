@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: sportspot-api
+    env: node
+    rootDir: backend
+    plan: free
+    buildCommand: |
+      npm install
+      npm run db:generate
+      npm run build
+    startCommand: npm run start:prod
+    preDeployCommand: |
+      npm run db:migrate
+      npm run db:seed
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://sportspot-web.onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sportspot-db
+          property: connectionString
+
+  - type: web
+    name: sportspot-web
+    env: node
+    rootDir: web
+    plan: free
+    buildCommand: |
+      npm install
+      npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: https://sportspot-api.onrender.com/api
+
+databases:
+  - name: sportspot-db
+    databaseName: sportspot
+    user: sportspot
+    plan: free
