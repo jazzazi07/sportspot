@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: sportspot-db
+    environment:
+      POSTGRES_USER: sportspot
+      POSTGRES_PASSWORD: sportspot
+      POSTGRES_DB: sportspot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - sportspot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sportspot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NestJS Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: sportspot-backend
+    environment:
+      DATABASE_URL: postgresql://sportspot:sportspot@postgres:5432/sportspot
+      JWT_SECRET: sportspot-dev-secret-key-change-in-production
+      JWT_EXPIRATION: 7d
+      VISA_GATEWAY_API_KEY: dev-visa-api-key
+      VISA_GATEWAY_API_SECRET: dev-visa-api-secret
+      VISA_GATEWAY_WEBHOOK_SECRET: dev-webhook-secret
+      VISA_GATEWAY_API_URL: https://api.sandbox.visa-gateway.example.com
+      NODE_ENV: development
+      APP_PORT: 3000
+      APP_HOST: 0.0.0.0
+      CORS_ORIGIN: "http://localhost:3001,http://localhost:3000"
+      PLATFORM_COMMISSION_PERCENTAGE: "10"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sportspot-network
+    volumes:
+      - ./backend/src:/app/backend/src
+    restart: unless-stopped
+
+  # Next.js Frontend
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: sportspot-web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api
+      NEXT_PUBLIC_APP_NAME: SportSpot
+      NEXT_PUBLIC_ENABLE_PAYMENTS: "true"
+      NEXT_PUBLIC_ENABLE_ADMIN: "true"
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - sportspot-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  sportspot-network:
+    driver: bridge
